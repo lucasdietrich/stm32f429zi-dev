@@ -38,7 +38,7 @@
             "command": "${westPath}",
             "args": [
                 "flash",
-                " --serial",
+                "--serial",
                 "${serialNumber}",
             ],
             "group": "build",

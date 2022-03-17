@@ -1,9 +1,9 @@
 {
-    "env" : {
+    "env": {
         "zephyrDirectory": "../zephyr",
-        "modulesDirectory":  "../modules",
+        "modulesDirectory": "../modules",
         "buildDirectory": "${workspaceFolder}/build"
-    }, 
+    },
     "configurations": [
         {
             "name": "PlatformIO",
@@ -53,7 +53,8 @@
                 "${buildDirectory}/zephyr/include/generated/autoconf.h",
                 "${zephyrDirectory}/include/toolchain/zephyr_stdint.h"
             ],
-            "compilerPath": "/usr/bin/arm-none-eabi-gcc"
+            "compilerPath": "/usr/bin/arm-none-eabi-gcc",
+            "compileCommands": "${workspaceFolder}/build/compile_commands.json"
         }
     ],
     "version": 4
