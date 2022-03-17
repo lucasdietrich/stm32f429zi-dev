@@ -1,0 +1,43 @@
+// {
+//     "version": "0.2.0",
+//     "configurations": [
+//         {
+//             "name": "JLink debug",
+//             "type": "cortex-debug",
+//             "request": "launch",
+//             "executable": "${workspaceFolder}/build/zephyr/zephyr.elf",
+//             "args": [],
+//             "cwd": "${workspaceFolder}",
+//             "environment": [],
+//             "externalConsole": true,
+//             "servertype": "openocd",
+//             "server"
+//             "configFiles": [
+//                 "/usr/share/openocd/scripts/interface/stlink-v2.cfg",
+//                 "target/stm32h7x.cfg",
+//             ],
+//             "openOCDLaunchCommands": ["init", "reset init"],
+//             "runToEntryPoint": "main",
+//             "svdFile": "./.vscode/STM32F429x.svd",
+//             "preLaunchTask": "debugserver",
+//         }
+//     ]
+// }
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "JLink debug",
+            "type": "cortex-debug",
+            "request": "launch", // "attach" ?
+            "executable": "${workspaceFolder}/build/zephyr/zephyr.elf",
+            "cwd": "${workspaceFolder}",
+            "device": "stm32f429zi",
+            "externalConsole": true,
+            "servertype": "stutil",
+            "interface": "swd",
+            "runToEntryPoint": "main",
+            // "preLaunchTask": "debugserver",
+        }
+    ]
+}

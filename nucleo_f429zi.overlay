@@ -1,0 +1,27 @@
+#include "dt-bindings/pinctrl/stm32-pinctrl-common.h"
+
+/* order matters */
+/delete-node/ &boot_partition;
+/delete-node/ &storage_partition;
+/delete-node/ &slot0_partition;
+/delete-node/ &slot1_partition;
+/delete-node/ &scratch_partition;
+
+&flash0 {
+        // flash size is 0x200000
+        partitions {
+                compatible = "fixed-partitions";
+                #address-cells = <0x1>;
+                #size-cells = <0x1>;
+                application_partition: partition@0 {
+                        label = "application";
+                        reg = <0x0 DT_SIZE_K(2048 - 128 - 128)>;
+                };
+        };
+};
+
+/ {
+        chosen {
+                zephyr,code-partition = &application_partition;
+        };
+};
