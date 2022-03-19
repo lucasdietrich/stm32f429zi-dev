@@ -1,10 +1,13 @@
 #include <kernel.h>
 
+#include "ipc/ipc.h"
+
 int main(void)
 {
+	ipc_initialize();
+
 	for (;;)
 	{
-		printk("Hello, world!\n");
 		k_sleep(K_SECONDS(1));
 	}
 	

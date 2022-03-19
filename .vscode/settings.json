@@ -1,3 +1,7 @@
 {
     "tasks.statusbar.default.hide": true,
+    "files.associations": {
+        "*.asm": "avr",
+        "string.h": "c"
+    },
 }
