@@ -23,13 +23,42 @@ static const struct device *uart_dev = DEVICE_DT_GET(IPC_UART_NODE);
 static uint8_t double_buffer[2][IPC_FRAME_SIZE];
 static uint8_t *next_buffer = double_buffer[1];
 
+typedef enum {
+	/**
+	 * @brief Waiting for the first byte of the start delimiter
+	 */
+	PARSING_CATCH_FRAME = 0, 
+
+	/**
+	 * @brief Parsing the start sfd
+	 */
+	PARSING_FRAME_START_DELIMITER,
+
+	/**
+	 * @brief Parsing the data,
+	 * waiting for the first byte of the end delimiter
+	 */
+	PARSING_FRAME_DATA,
+	
+	/**
+	 * @brief Parsing the efd
+	 */
+	PARSING_FRAME_END_DELIMITER
+} parsing_state_t;
+
 // internal : interrupt, thread
 static struct {
-	ipc_frame_t *frame;
-	size_t received;
-} cur_rx_context = {
-	.frame = NULL,
-	.received = 0U
+	parsing_state_t state;
+	size_t state_rem_bytes;
+	union {
+		ipc_frame_t *frame;
+		uint8_t *raw;
+	};
+	size_t filling;
+} parsing_ctx = {
+	.state = PARSING_CATCH_FRAME,
+	.state_rem_bytes = 0U,
+	.filling = 0U
 };
 
 #define IPC_MEMSLAB_COUNT (CONFIG_IPC_MEMSLAB_COUNT)
@@ -79,144 +108,171 @@ int ipc_attach_msgq(struct k_msgq *msgq)
 	return 0;
 }
 
-/**
- * @brief  Find sequence of bytes in an array
- * 
- * @param s array to search in
- * @param n size of array
- * @param seq sequence to search for
- * @param m size of sequence
- * @return const uint8_t* pointer to the first byte of the sequence in the array, or NULL if not found
- */
-static const uint8_t *memseqchr(const uint8_t *s,
-				size_t n,
-				const uint8_t *seq,
-				size_t m)
+// convert enum parsing_state to string
+static const char *parsing_state_to_str(parsing_state_t state)
 {
-	const uint8_t *p = s;
-	const uint8_t *c = seq;
-
-	while (p != NULL) {
-		p = memchr(s, *c, n);
-		if (p != NULL) {
-			size_t i = 1U;
-			while (i < m && p[i] == seq[i]) {
-				i++;
-			}
-
-			if (i == m) {
-				break;
-			} else {
-				n -= (p - s) + 1;
-				s = p + 1;
-			}
-		}
+	switch (state) {
+	case PARSING_CATCH_FRAME:
+		return "PARSING_CATCH_FRAME";
+	case PARSING_FRAME_START_DELIMITER:
+		return "PARSING_FRAME_START_DELIMITER";
+	case PARSING_FRAME_DATA:
+		return "PARSING_FRAME_DATA";
+	case PARSING_FRAME_END_DELIMITER:
+		return "PARSING_FRAME_END_DELIMITER";
+	default:
+		return "<UNKNOWN>";
 	}
+}
 
-	return p;
+/**
+ * @brief Copy data from the buffer to the context frame
+ * 
+ * @param data 
+ * @param len 
+ */
+static inline void copy(uint8_t *data, size_t len)
+{
+	memcpy(parsing_ctx.raw + parsing_ctx.filling, data, len);
+	parsing_ctx.filling += len;
+}
+
+static inline void copy_byte(const char chr)
+{
+	parsing_ctx.raw[parsing_ctx.filling] = chr;
+	parsing_ctx.filling++;
+}
+
+static void reset_parsing_ctx(void)
+{
+	parsing_ctx.state = PARSING_CATCH_FRAME;
+	parsing_ctx.filling = 0U;
 }
 
 static void handle_received_chunk(const uint8_t *data, size_t size)
 {
-	__ASSERT(size <= IPC_FRAME_SIZE, "size too big");
-	
-	LOG_DBG("Received %u B", size);
-
 	int ret;
-	const uint8_t *position = data;
 
-	/* no frame received yet */
-	if (cur_rx_context.frame == NULL) {
+	while (size > 0) {
+		LOG_DBG("%s : Remaining to parse %u B",
+			log_strdup(parsing_state_to_str(parsing_ctx.state)), size);
 
-		/* we expect a start frame delimiter */
-		const uint32_t sfd = IPC_START_FRAME_DELIMITER;
-		position = memseqchr(data, size,
-				     (const uint8_t *) &sfd,
-				     IPC_START_FRAME_DELIMITER_SIZE);
-		LOG_HEXDUMP_WRN(data, size, "sfd");
+		switch (parsing_ctx.state) {
+		case PARSING_CATCH_FRAME:
+		{
+			/* looking for the first byte of the start frame delimiter */
+			uint8_t *const p = (uint8_t *)
+				memchr(data, IPC_START_FRAME_DELIMITER_BYTE, size);
+			if (p != NULL) {
+				/* if start frame delimiter is not at the very
+				 * beginning of the chunk, we discard first bytes
+				 */
+				if (p != data) {
+					LOG_WRN("Discarded %u B",
+						(size_t)(p - data));
+				}
 
-		if (position == NULL) {
-			/* start frame delimiter not found, discard data */
-			LOG_WRN("DELIMITER not found, discarding %u B", size);
-			return;
+				/* adjust frame beginning */
+				size -= (p - data);
+				data = p;
+
+				/* try allocate a frame buffer */
+				ret = alloc_frame_buf(&parsing_ctx.frame);
+				if (ret != 0) {
+					goto discard;
+				}
+
+				/* prepare context for the next state */
+				parsing_ctx.state_rem_bytes =
+					IPC_START_FRAME_DELIMITER_SIZE - 1U;
+				parsing_ctx.state = PARSING_FRAME_START_DELIMITER;
+				copy_byte(*data);
+				data++;
+				size--;
+			} else {
+				/* not found */
+				goto discard;
+			}
+			break;
 		}
+		case PARSING_FRAME_START_DELIMITER:
+		{
+			while (parsing_ctx.state_rem_bytes > 0U && size > 0U) {
+				if (data[0] == IPC_START_FRAME_DELIMITER_BYTE) {
+					copy_byte(*data);
+					parsing_ctx.state_rem_bytes--;
+					data++;
+					size--;
 
-		if (position != data) {
-			/* start frame delimiter not at the beginning of the data,
-			 * discard some data */
-			LOG_WRN("DELIMITER not at beginning, discarding some %u B",
-				position - data);
+				} else {
+					goto discard;
+				}
+			}
+
+			if (parsing_ctx.state_rem_bytes == 0U) {
+				parsing_ctx.state = PARSING_FRAME_DATA;
+				parsing_ctx.state_rem_bytes = IPC_FRAME_SIZE
+					- IPC_START_FRAME_DELIMITER_SIZE
+					- IPC_END_FRAME_DELIMITER_SIZE;
+			}
+			break;
 		}
+		case PARSING_FRAME_DATA:
+		{
+			while (parsing_ctx.state_rem_bytes > 0U && size > 0U) {
+				parsing_ctx.state_rem_bytes--;
+				copy_byte(*data);
+				data++;
+				size--;
+			}
 
-		/* if start frame delimiter is found, allocate a frame buffer */
-		ret = alloc_frame_buf(&cur_rx_context.frame);
-		if (ret != 0) {
-			LOG_ERR("alloc_frame_buf() failed %d, discarding %u B",
-				ret, size);
-			return;
+			if (parsing_ctx.state_rem_bytes == 0U) {
+				parsing_ctx.state = PARSING_FRAME_END_DELIMITER;
+				parsing_ctx.state_rem_bytes = IPC_END_FRAME_DELIMITER_SIZE;
+			}
+			break;
+		}
+		case PARSING_FRAME_END_DELIMITER:
+		{
+			while (parsing_ctx.state_rem_bytes > 0U && size > 0U) {
+				if (data[0] == IPC_END_FRAME_DELIMITER_BYTE) {
+					parsing_ctx.state_rem_bytes--;
+					copy_byte(*data);
+					data++;
+					size--;
+				} else {
+					goto discard;
+				}
+			}
+
+			if (parsing_ctx.state_rem_bytes == 0U) {
+				__ASSERT(parsing_ctx.filling == IPC_FRAME_SIZE,
+					 "Invalid frame size");
+
+				/* Pass the detected frame to the processing thread by
+				* the FIFO
+				* Note: As queuing a FIFO requires to write an address
+				*  at the beginning of the queued data, the start
+				*  frame delimiter will be overwritten.
+				*  However we don't need it anymore as it has been already
+				*  checked above.
+				*/
+				k_fifo_put(&frames_fifo, parsing_ctx.frame);
+
+				/* reset context for next frame */
+				reset_parsing_ctx();
+			}
+			break;
+		}
 		}
 	}
+	return;
 
-	const size_t append_size = size - (position - data);
-	const size_t frame_remaining_size = IPC_FRAME_SIZE - cur_rx_context.received;
-
-	size_t append_size_to_frame;
-	size_t append_size_to_next_frame;
-
-	/* if next frame start are already received in the current buffer */
-	if (append_size > frame_remaining_size) {
-		append_size_to_frame = frame_remaining_size;
-		append_size_to_next_frame = append_size - frame_remaining_size;
-	} else {
-		append_size_to_frame = append_size;
-	}	append_size_to_next_frame = 0U;
-
-	/* copy data to the frame buffer */
-	memcpy(&cur_rx_context.frame[cur_rx_context.received],
-	       position, append_size_to_frame);
-
-	cur_rx_context.received += append_size_to_frame;
-
-	/* if frame is complete */
-	if (cur_rx_context.received == IPC_FRAME_SIZE) {
-
-		/* a frame is complete, verify the end frame delimiter */
-		const uint8_t *const end_delimiter_pos =
-			((uint8_t *) cur_rx_context.frame) +
-			IPC_FRAME_SIZE -
-			IPC_END_FRAME_DELIMITER_SIZE;
-		const uint32_t efd = IPC_END_FRAME_DELIMITER;
-		if (memcmp(end_delimiter_pos,
-			   (void *) &efd,
-			   IPC_END_FRAME_DELIMITER_SIZE) == 0) {
-
-			/* Pass the detected frame to the processing thread by 
-			 * the FIFO
-			 * Note: As queuing a FIFO requires to write an address 
-			 *  at the beginning of the queued data, the start 
-			 *  frame delimiter will be overwritten.
-			 *  However we don't need it anymore as it has been already
-			 *  checked above.
-			 */
-			k_fifo_put(&frames_fifo, cur_rx_context.frame);
-		} else {
-			LOG_WRN("END_DELIMITER not found, discarding %u B",
-				IPC_FRAME_SIZE);
-		}
-
-		/* ready to receive the next frame */
-		cur_rx_context.frame = NULL;
-		cur_rx_context.received = 0U;
-
-		/* if there is some data left to process */
-		if (append_size_to_next_frame != 0) {
-			LOG_DBG("Received %u B from next frame", 
-				append_size_to_next_frame);
-				
-			position += append_size_to_frame;
-			handle_received_chunk(position, append_size_to_next_frame);
-		}
-	}
+discard:
+	LOG_WRN("\tDiscarding %u B", size);
+	free_frame_buf(&parsing_ctx.frame);
+	reset_parsing_ctx();
+	return;
 }
 
 static void uart_callback(const struct device *dev,
