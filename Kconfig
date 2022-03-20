@@ -1,0 +1,16 @@
+mainmenu "ipc_uart"
+
+config IPC_TEST_LOOPBACK
+	bool "Enable TX thread for testing"
+	default n
+	help
+		Enable TX thread for testing uart loopback.
+
+# artificaly enable HAL_CRC drivers from STM32CUBE
+# read : https://github.com/zephyrproject-rtos/zephyr/issues/37543
+config MY_STM32_HAL
+  default y
+  bool
+  select USE_STM32_HAL_CRC
+
+source "Kconfig.zephyr"

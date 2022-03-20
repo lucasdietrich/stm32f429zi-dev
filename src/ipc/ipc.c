@@ -7,7 +7,7 @@
 #include <drivers/uart.h>
 
 #include <logging/log.h>
-LOG_MODULE_REGISTER(ipc, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(ipc, LOG_LEVEL_INF);
 
 // TODO monitor usage using CONFIG_MEM_SLAB_TRACE_MAX_UTILIZATION
 
@@ -92,14 +92,7 @@ bool ipc_is_initialized(void)
 	return (atomic_get(ipc_state) & IPC_STATE_INITIALIZED_MASK) != 0;
 }
 
-/*___________________________________________________________________________*/
-
-void ipc_debug(void)
-{
-	LOG_DBG("IPC_FRAME_SIZE = %u", IPC_FRAME_SIZE);
-}
-
-int ipc_attach_msgq(struct k_msgq *msgq)
+int ipc_attach_rx_msgq(struct k_msgq *msgq)
 {
 	if (ipc_is_initialized() == true) {
 		LOG_ERR("IPC already initialized %d", 0);
@@ -110,6 +103,8 @@ int ipc_attach_msgq(struct k_msgq *msgq)
 
 	return 0;
 }
+
+/*___________________________________________________________________________*/
 
 // convert enum parsing_state to string
 static const char *parsing_state_to_str(parsing_state_t state)
@@ -123,6 +118,29 @@ static const char *parsing_state_to_str(parsing_state_t state)
 		return "PARSING_FRAME_DATA";
 	case PARSING_FRAME_END_DELIMITER:
 		return "PARSING_FRAME_END_DELIMITER";
+	default:
+		return "<UNKNOWN>";
+	}
+}
+
+// convert uart_event to string
+static const char *uart_event_to_str(enum uart_event_type type)
+{
+	switch (type) {
+	case UART_TX_DONE:
+		return "UART_TX_DONE";
+	case UART_TX_ABORTED:
+		return "UART_TX_ABORTED";
+	case UART_RX_RDY:
+		return "UART_RX_RDY";
+	case UART_RX_BUF_REQUEST:
+		return "UART_RX_BUF_REQUEST";
+	case UART_RX_BUF_RELEASED:
+		return "UART_RX_BUF_RELEASED";
+	case UART_RX_DISABLED:
+		return "UART_RX_DISABLED";
+	case UART_RX_STOPPED:
+		return "UART_RX_STOPPED";
 	default:
 		return "<UNKNOWN>";
 	}
@@ -194,7 +212,6 @@ static void handle_received_chunk(const uint8_t *data, size_t size)
 				size--;
 			} else {
 				/* not found */
-				LOG_WRN("\tSFD not found %u B", size);
 				goto discard;
 			}
 			break;
@@ -245,12 +262,10 @@ static void handle_received_chunk(const uint8_t *data, size_t size)
 					data++;
 					size--;
 				} else {
-					LOG_WRN("\tEFD not found, rem = %u B", parsing_ctx.state_rem_bytes);
+					/* not found */
 					goto discard;
 				}
 			}
-
-			LOG_DBG("size = %u, rem = %u", size, parsing_ctx.state_rem_bytes);
 
 			if (parsing_ctx.state_rem_bytes == 0U) {
 				__ASSERT(parsing_ctx.filling == IPC_FRAME_SIZE,
@@ -276,29 +291,43 @@ static void handle_received_chunk(const uint8_t *data, size_t size)
 	return;
 
 discard:
-	LOG_WRN("\t %s : Discarding %u B",
+	LOG_WRN("\t %s : Discarding %u B from state ",
 		log_strdup(parsing_state_to_str(parsing_ctx.state)), size);
+
 	free_frame_buf(&parsing_ctx.frame);
 	reset_parsing_ctx();
 	return;
 }
 
+#if defined(CONFIG_IPC_TEST_LOOPBACK)
+static K_SEM_DEFINE(ipc_tx_sem, 1, 1);
+
+static inline void ipc_tx_done(void)
+{
+	k_sem_give(&ipc_tx_sem);
+}
+#else 
+static inline void ipc_tx_done(void) { }
+#endif 
+
 static void uart_callback(const struct device *dev,
 			  struct uart_event *evt,
 			  void *user_data)
 {
-	LOG_DBG("evt->type = %u", evt->type);
+	LOG_DBG("%s", uart_event_to_str(evt->type));
 
 	switch (evt->type) {
 	case UART_TX_DONE:
+		ipc_tx_done();
 		break;
 	case UART_TX_ABORTED:
 		break;
 	case UART_RX_RDY:
 	{
-		LOG_DBG("raw len = %u", evt->data.rx.len);
+		LOG_DBG("buf %x + %x : %u", (uint32_t) evt->data.rx.buf,
+			evt->data.rx.offset, evt->data.rx.len);
 		LOG_HEXDUMP_DBG(evt->data.rx.buf + evt->data.rx.offset,
-				evt->data.rx.len, "");
+				evt->data.rx.len, "RAW");
 
 		handle_received_chunk(evt->data.rx.buf + evt->data.rx.offset,
 				      evt->data.rx.len);
@@ -390,8 +419,51 @@ static void ipc_thread(void *_a, void *_b, void *_c)
 
 void ipc_log_frame(const ipc_frame_t *frame)
 {
-	LOG_INF("IPC frame: %u B, seq = %x, data size = %u, sfd = %x, efd = %x crc32=%u",
+	LOG_INF("IPC frame: %u B, seq = %x, data size = %u, sfd = %x, efd = %x crc32=%x",
 		IPC_FRAME_SIZE, frame->seq, frame->data.size, frame->start_delimiter,
 		frame->end_delimiter, frame->crc32);
 	// LOG_HEXDUMP_DBG(frame->data.buf, frame->data.size, "IPC frame data");
 }
+
+/*___________________________________________________________________________*/
+
+#if defined(CONFIG_IPC_TEST_LOOPBACK)
+
+// thread
+static void tx_thread(void *_a, void *_b, void *_c);
+
+K_THREAD_DEFINE(tx_thread_id, 0x400, tx_thread, NULL, NULL, NULL, K_PRIO_PREEMPT(8), 0, 0);
+
+static void build_tx_frame(ipc_frame_t *frame)
+{
+	frame->start_delimiter = IPC_START_FRAME_DELIMITER;
+	frame->seq = 0U;
+	frame->data.size = IPC_MAX_DATA_SIZE;
+	frame->crc32 = 0xBBBBBBBBLU;
+	frame->end_delimiter = IPC_END_FRAME_DELIMITER;
+
+	for (uint32_t i = 0; i < IPC_MAX_DATA_SIZE; i++) {
+		frame->data.buf[i] = i;
+	}
+}
+
+static void tx_thread(void *_a, void *_b, void *_c)
+{
+	static ipc_frame_t frame;
+
+	build_tx_frame(&frame);
+
+	k_sleep(K_SECONDS(2));
+
+	for (;;) {
+		k_sem_take(&ipc_tx_sem, K_FOREVER);
+
+		frame.seq++;
+
+		uart_tx(uart_dev, (const uint8_t *) &frame, IPC_FRAME_SIZE, 0);
+
+		k_sleep(K_SECONDS(5));
+	}	
+}
+
+#endif
