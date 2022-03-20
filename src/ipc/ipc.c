@@ -6,6 +6,8 @@
 #include <devicetree.h>
 #include <drivers/uart.h>
 
+#include "../drivers/crc/stm32_crc32.h"
+
 #include <logging/log.h>
 LOG_MODULE_REGISTER(ipc, LOG_LEVEL_INF);
 
@@ -17,8 +19,10 @@ LOG_MODULE_REGISTER(ipc, LOG_LEVEL_INF);
 
 // drivers
 #define IPC_UART_NODE DT_ALIAS(ipc_uart)
+#define CRC_NODE DT_NODELABEL(crc1)
 
 static const struct device *uart_dev = DEVICE_DT_GET(IPC_UART_NODE);
+static const struct device *crc_dev = DEVICE_DT_GET(CRC_NODE);
 
 static uint8_t double_buffer[2][IPC_FRAME_SIZE];
 static uint8_t *next_buffer = double_buffer[1];
@@ -360,6 +364,11 @@ int ipc_initialize(void)
 {
 	int ret;
 
+	if (device_is_ready(crc_dev) == false) {
+		LOG_ERR("CRC device not ready = %d", 0);
+		return -1;
+	}
+
 	if (device_is_ready(uart_dev) == false) {
 		LOG_ERR("IPC UART device not ready = %d", 0);
 		return -1;
@@ -392,12 +401,34 @@ static void ipc_thread(void *_a, void *_b, void *_c);
 
 K_THREAD_DEFINE(ipc_thread_id, 0x400, ipc_thread, NULL, NULL, NULL, K_PRIO_PREEMPT(8), 0, 0);
 
+static inline uint32_t ipc_frame_crc32(ipc_frame_t *frame)
+{
+	uint32_t *const start = (uint32_t *)&frame->seq;
+	size_t len = sizeof(frame->data) + sizeof(frame->seq); // multiple of 4
+
+	return crc_calculate(crc_dev, start, len >> 4);
+}
+
+static bool verify_frame_crc32(ipc_frame_t *frame)
+{
+	const uint32_t crc32 = ipc_frame_crc32(frame);
+	const bool result = crc32 == frame->crc32;
+
+	if (result == false) {
+		LOG_ERR("CRC32 mismatch: %x != %x", crc32, frame->crc32);
+	}
+
+	return result;
+}
+
 static void ipc_thread(void *_a, void *_b, void *_c)
 {
 	ipc_frame_t *frame;
 
 	uint32_t last_seq = 0U;
 	bool first = true;
+
+	ipc_initialize();
 
 	for (;;) {
 		frame = (ipc_frame_t *) k_fifo_get(&frames_fifo, K_FOREVER);
@@ -410,6 +441,11 @@ static void ipc_thread(void *_a, void *_b, void *_c)
 		}
 		first = false;
 		last_seq = frame->seq;
+
+		/* verify frame */
+		verify_frame_crc32(frame);
+
+		/* dispatch frame */
 
 		free_frame_buf(&frame);
 	}	
