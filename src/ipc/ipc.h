@@ -19,7 +19,7 @@
 
 #define IPC_VERSION 1
 
-#define IPC_MAX_DATA_SIZE 0x10U
+#define IPC_MAX_DATA_SIZE 0x100U
 
 #define FROM_UINT32_FROM_BYTE(byte) ((uint32_t) (((byte) & 0xFFU) \
 	| (((byte) & 0xFFU) << 8U) \

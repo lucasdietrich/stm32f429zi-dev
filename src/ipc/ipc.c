@@ -12,7 +12,7 @@ LOG_MODULE_REGISTER(ipc, LOG_LEVEL_DBG);
 // TODO monitor usage using CONFIG_MEM_SLAB_TRACE_MAX_UTILIZATION
 
 // config
-#define IPC_UART_RX_TIMEOUT_MS 2000U
+#define IPC_UART_RX_TIMEOUT_MS 50U
 #define CONFIG_IPC_MEMSLAB_COUNT 2
 
 // drivers
@@ -71,7 +71,10 @@ static inline int alloc_frame_buf(ipc_frame_t **p_frame) {
 }
 
 static inline void free_frame_buf(ipc_frame_t **p_frame) {
-	k_mem_slab_free(&frames_slab, (void **) p_frame);
+	if (*p_frame != NULL) {
+		k_mem_slab_free(&frames_slab, (void **) p_frame);
+		p_frame = NULL;
+	}
 }
 
 // application
@@ -154,9 +157,8 @@ static void handle_received_chunk(const uint8_t *data, size_t size)
 	int ret;
 
 	while (size > 0) {
-		LOG_DBG("%s : Remaining to parse %u B",
-			log_strdup(parsing_state_to_str(parsing_ctx.state)), size);
-
+		LOG_DBG("%s", parsing_state_to_str(parsing_ctx.state));
+		
 		switch (parsing_ctx.state) {
 		case PARSING_CATCH_FRAME:
 		{
@@ -170,15 +172,16 @@ static void handle_received_chunk(const uint8_t *data, size_t size)
 				if (p != data) {
 					LOG_WRN("Discarded %u B",
 						(size_t)(p - data));
-				}
 
-				/* adjust frame beginning */
-				size -= (p - data);
-				data = p;
+					/* adjust frame beginning */
+					size -= (p - data);
+					data = p;
+				}
 
 				/* try allocate a frame buffer */
 				ret = alloc_frame_buf(&parsing_ctx.frame);
 				if (ret != 0) {
+					LOG_ERR("Failed to allocate buf %d", ret);
 					goto discard;
 				}
 
@@ -191,6 +194,7 @@ static void handle_received_chunk(const uint8_t *data, size_t size)
 				size--;
 			} else {
 				/* not found */
+				LOG_WRN("\tSFD not found %u B", size);
 				goto discard;
 			}
 			break;
@@ -241,9 +245,12 @@ static void handle_received_chunk(const uint8_t *data, size_t size)
 					data++;
 					size--;
 				} else {
+					LOG_WRN("\tEFD not found, rem = %u B", parsing_ctx.state_rem_bytes);
 					goto discard;
 				}
 			}
+
+			LOG_DBG("size = %u, rem = %u", size, parsing_ctx.state_rem_bytes);
 
 			if (parsing_ctx.state_rem_bytes == 0U) {
 				__ASSERT(parsing_ctx.filling == IPC_FRAME_SIZE,
@@ -269,7 +276,8 @@ static void handle_received_chunk(const uint8_t *data, size_t size)
 	return;
 
 discard:
-	LOG_WRN("\tDiscarding %u B", size);
+	LOG_WRN("\t %s : Discarding %u B",
+		log_strdup(parsing_state_to_str(parsing_ctx.state)), size);
 	free_frame_buf(&parsing_ctx.frame);
 	reset_parsing_ctx();
 	return;
@@ -288,6 +296,10 @@ static void uart_callback(const struct device *dev,
 		break;
 	case UART_RX_RDY:
 	{
+		LOG_DBG("raw len = %u", evt->data.rx.len);
+		LOG_HEXDUMP_DBG(evt->data.rx.buf + evt->data.rx.offset,
+				evt->data.rx.len, "");
+
 		handle_received_chunk(evt->data.rx.buf + evt->data.rx.offset,
 				      evt->data.rx.len);
 		break;
@@ -353,29 +365,22 @@ K_THREAD_DEFINE(ipc_thread_id, 0x400, ipc_thread, NULL, NULL, NULL, K_PRIO_PREEM
 
 static void ipc_thread(void *_a, void *_b, void *_c)
 {
-	// todo poll
 	ipc_frame_t *frame;
 
-	ipc_frame_t tx_frame = {
-		.start_delimiter = IPC_START_FRAME_DELIMITER,
-		.seq = 0U,
-		.data = {
-			.size = 2U,
-			.buf = {'a', 'b'}
-		},
-		.crc32 = 2,
-		.end_delimiter = IPC_END_FRAME_DELIMITER
-	};
-
-	int ret = uart_tx(uart_dev, (const uint8_t *) &tx_frame, sizeof(tx_frame), SYS_FOREVER_MS);
-	if (ret != 0) {
-		LOG_ERR("uart_tx() failed %d", ret);
-	}
+	uint32_t last_seq = 0U;
+	bool first = true;
 
 	for (;;) {
 		frame = (ipc_frame_t *) k_fifo_get(&frames_fifo, K_FOREVER);
 
 		ipc_log_frame(frame);
+
+		const uint32_t diff = frame->seq - last_seq;
+		if (diff != 1U && !first) {
+			LOG_WRN("\tSeq diff %u", diff);
+		}
+		first = false;
+		last_seq = frame->seq;
 
 		free_frame_buf(&frame);
 	}	
@@ -385,8 +390,8 @@ static void ipc_thread(void *_a, void *_b, void *_c)
 
 void ipc_log_frame(const ipc_frame_t *frame)
 {
-	LOG_INF("IPC frame: %u B, data size = %u, sfd = %x, efd = %x crc32=%u",
-		IPC_FRAME_SIZE, frame->data.size, frame->start_delimiter,
+	LOG_INF("IPC frame: %u B, seq = %x, data size = %u, sfd = %x, efd = %x crc32=%u",
+		IPC_FRAME_SIZE, frame->seq, frame->data.size, frame->start_delimiter,
 		frame->end_delimiter, frame->crc32);
-	LOG_HEXDUMP_DBG(frame->data.buf, frame->data.size, "IPC frame data");
+	// LOG_HEXDUMP_DBG(frame->data.buf, frame->data.size, "IPC frame data");
 }
