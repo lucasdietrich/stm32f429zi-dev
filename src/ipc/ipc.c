@@ -68,7 +68,7 @@ static struct {
 #define IPC_MEMSLAB_COUNT (CONFIG_IPC_MEMSLAB_COUNT)
 
 static K_MEM_SLAB_DEFINE(frames_slab, IPC_FRAME_SIZE, IPC_MEMSLAB_COUNT, 4);
-static K_FIFO_DEFINE(frames_fifo);
+static K_FIFO_DEFINE(rx_fifo);
 
 static inline int alloc_frame_buf(ipc_frame_t **p_frame) {
 	return k_mem_slab_alloc(&frames_slab, (void **) p_frame, K_NO_WAIT);
@@ -91,7 +91,7 @@ static struct k_msgq *application_msgq = NULL;
 
 ATOMIC_DEFINE(ipc_state, 1U);
 
-bool ipc_is_initialized(void)
+static bool ipc_is_initialized(void)
 {
 	return (atomic_get(ipc_state) & IPC_STATE_INITIALIZED_MASK) != 0;
 }
@@ -283,7 +283,7 @@ static void handle_received_chunk(const uint8_t *data, size_t size)
 				*  However we don't need it anymore as it has been already
 				*  checked above.
 				*/
-				k_fifo_put(&frames_fifo, parsing_ctx.frame);
+				k_fifo_put(&rx_fifo, parsing_ctx.frame);
 
 				/* reset context for next frame */
 				reset_parsing_ctx();
@@ -360,7 +360,7 @@ static void uart_callback(const struct device *dev,
 	}
 }
 
-int ipc_initialize(void)
+static int ipc_initialize(void)
 {
 	int ret;
 
@@ -421,44 +421,46 @@ static bool verify_frame_crc32(ipc_frame_t *frame)
 	return result;
 }
 
+static void ipc_log_frame(const ipc_frame_t *frame)
+{
+	LOG_INF("IPC frame: %u B, seq = %x, data size = %u, sfd = %x, efd = %x crc32=%x",
+		IPC_FRAME_SIZE, frame->seq, frame->data.size, frame->start_delimiter,
+		frame->end_delimiter, frame->crc32);
+	LOG_HEXDUMP_DBG(frame->data.buf, frame->data.size, "IPC frame data");
+}
+
 static void ipc_thread(void *_a, void *_b, void *_c)
 {
 	ipc_frame_t *frame;
-
 	uint32_t last_seq = 0U;
-	bool first = true;
 
 	ipc_initialize();
 
 	for (;;) {
-		frame = (ipc_frame_t *) k_fifo_get(&frames_fifo, K_FOREVER);
+		frame = (ipc_frame_t *) k_fifo_get(&rx_fifo, K_FOREVER);
 
 		ipc_log_frame(frame);
 
-		const uint32_t diff = frame->seq - last_seq;
-		if (diff != 1U && !first) {
-			LOG_WRN("\tSeq diff %u", diff);
+		if (frame->seq > last_seq + 1) {
+			LOG_WRN("Seq gap %u -> %u, %u frames lost", last_seq,
+				frame->seq, frame->seq - last_seq - 1);
+		} else if (frame->seq < last_seq) {
+			LOG_WRN("Seq rollback to %u %u, peer probably reseted",
+				last_seq, frame->seq);
 		}
-		first = false;
+
 		last_seq = frame->seq;
 
 		/* verify frame */
 		verify_frame_crc32(frame);
 
 		/* dispatch frame */
+		if (application_msgq != NULL) {
+			k_msgq_put(application_msgq, frame, K_NO_WAIT);
+		}
 
 		free_frame_buf(&frame);
 	}	
-}
-
-/*___________________________________________________________________________*/
-
-void ipc_log_frame(const ipc_frame_t *frame)
-{
-	LOG_INF("IPC frame: %u B, seq = %x, data size = %u, sfd = %x, efd = %x crc32=%x",
-		IPC_FRAME_SIZE, frame->seq, frame->data.size, frame->start_delimiter,
-		frame->end_delimiter, frame->crc32);
-	// LOG_HEXDUMP_DBG(frame->data.buf, frame->data.size, "IPC frame data");
 }
 
 /*___________________________________________________________________________*/

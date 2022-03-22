@@ -19,14 +19,6 @@
 
 #include "ipc_frame.h"
 
-bool ipc_is_initialized(void);
-
-int ipc_initialize(void);
-
 int ipc_attach_rx_msgq(struct k_msgq *msgq);
-
-void ipc_log_frame(const ipc_frame_t *frame);
-
-// int ipc_attach_fifo(struct k_fifo *fifo);
 
 #endif /* _IPC_H_ */

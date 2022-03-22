@@ -9,4 +9,5 @@
         "stm32f4xx.h": "c",
         "stm32f4xx_hal_crc.h": "c"
     },
+    "git.useForcePushWithLease": true
 }
