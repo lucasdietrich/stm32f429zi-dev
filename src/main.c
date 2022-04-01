@@ -28,9 +28,9 @@ int main(void)
 
 			// show dataframe records
 			LOG_INF("Received BLE Xiaomi records count: %u, frame_time: %u",
-				dataframe->count, dataframe->frame_time);
+				dataframe->count, dataframe->time);
 
-			uint32_t frame_ref_time = dataframe->frame_time;
+			uint32_t frame_ref_time = dataframe->time;
 
 			// Show all records
 			for (uint8_t i = 0; i < dataframe->count; i++) {
@@ -40,7 +40,7 @@ int main(void)
 						  addr_str,
 						  sizeof(addr_str));
 
-				int32_t record_rel_time = rec->uptime - frame_ref_time;
+				int32_t record_rel_time = rec->time - frame_ref_time;
 
 				 // Show BLE address, temperature, humidity, battery
 				LOG_INF("\tBLE Xiaomi record %u [%d s]: addr: %s, " \
