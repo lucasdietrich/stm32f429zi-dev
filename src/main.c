@@ -1,60 +1,45 @@
 #include <zephyr.h>
 
-#include "ipc_uart/ipc_frame.h"
-#include "ipc_uart/ipc.h"
+#include <device.h>
+#include <drivers/sensor.h>
 
-#include "ble/xiaomi_record.h"
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32_temp)
+#define TEMP_NODE DT_INST(0, st_stm32_temp)
+#elif DT_HAS_COMPAT_STATUS_OKAY(st_stm32_temp_cal)
+#define TEMP_NODE DT_INST(0, st_stm32_temp_cal)
+#else
+#error "Could not find a compatible temperature sensor"
+#endif
 
-#include <logging/log.h>
-LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
-
-K_MSGQ_DEFINE(msgq, IPC_FRAME_SIZE, 1, 4);
-
-int main(void)
+void main(void)
 {
-	ipc_attach_rx_msgq(&msgq);
+	struct sensor_value val;
+	int rc;
+	const struct device *dev = DEVICE_DT_GET(TEMP_NODE);
 
-	static ipc_frame_t frame;
-
-	char addr_str[BT_ADDR_LE_STR_LEN];
-
-	for (;;) {
-
-		if (k_msgq_get(&msgq, (void *)&frame, K_FOREVER) == 0) {
-			LOG_HEXDUMP_DBG(frame.data.buf, frame.data.size, "IPC frame");
-
-			xiaomi_dataframe_t *const dataframe =
-				(xiaomi_dataframe_t *)frame.data.buf;
-
-			// show dataframe records
-			LOG_INF("Received BLE Xiaomi records count: %u, frame_time: %u",
-				dataframe->count, dataframe->time);
-
-			uint32_t frame_ref_time = dataframe->time;
-
-			// Show all records
-			for (uint8_t i = 0; i < dataframe->count; i++) {
-				xiaomi_record_t *const rec = &dataframe->records[i];
-
-				bt_addr_le_to_str(&rec->addr, 
-						  addr_str,
-						  sizeof(addr_str));
-
-				int32_t record_rel_time = rec->time - frame_ref_time;
-
-				 // Show BLE address, temperature, humidity, battery
-				LOG_INF("\tBLE Xiaomi record %u [%d s]: addr: %s, " \
-					"temp: %d.%d °C, hum: %u %%, bat: %u mV",
-					i,
-					record_rel_time,
-					log_strdup(addr_str),
-					rec->measurements.temperature / 100,
-					rec->measurements.temperature % 100,
-					rec->measurements.humidity,
-					rec->measurements.battery);
-			}
-		}
+	if (!device_is_ready(dev)) {
+		printk("Temperature sensor is not ready\n");
+		return;
 	}
 
-	return 0;
+	printk("STM32 Die temperature sensor test\n");
+
+	while (1) {
+		k_sleep(K_MSEC(5000));
+
+		/* fetch sensor samples */
+		rc = sensor_sample_fetch(dev);
+		if (rc) {
+			printk("Failed to fetch sample (%d)\n", rc);
+			continue;
+		}
+
+		rc = sensor_channel_get(dev, SENSOR_CHAN_DIE_TEMP, &val);
+		if (rc) {
+			printk("Failed to get data (%d)\n", rc);
+			continue;
+		}
+
+		printk("Current temperature: %.1f °C\n", sensor_value_to_double(&val));
+	}
 }
