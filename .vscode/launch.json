@@ -26,18 +26,53 @@
 {
     "version": "0.2.0",
     "configurations": [
-        {
-            "name": "JLink debug",
-            "type": "cortex-debug",
-            "request": "launch", // "attach" ?
-            "executable": "${workspaceFolder}/build/zephyr/zephyr.elf",
-            "cwd": "${workspaceFolder}",
-            "device": "stm32f429zi",
-            "externalConsole": true,
-            "servertype": "stutil",
-            "interface": "swd",
-            "runToEntryPoint": "main",
-            // "preLaunchTask": "debugserver",
-        }
+	// {
+	// 	"name": "OpenOCD debug",
+	// 	"request": "launch", // "attach" ?
+	// 	"type": "cortex-debug",
+	// 	"cwd": "${workspaceFolder}",
+	// 	"executable": "${workspaceFolder}/build/zephyr/zephyr.elf",
+	// 	"interface": "swd",
+	// 	"runToEntryPoint": "main",
+		
+	// 	"gdbPath": "/usr/bin/arm-none-eabi-gdb",
+	// 	"configFiles": [
+	// 		"../zephyr/boards/arm/nucleo_f429zi/support/openocd.cfg",
+	// 	],
+	// 	"device": "stm32f429zi",
+	// 	"servertype": "openocd",
+	// 	"serverpath": "/usr/bin/openocd",
+	// 	"externalConsole": true,
+	// }
+	{
+		"name": "OpenOCD debug",
+		"request": "launch", // "attach" ?
+		"type": "cortex-debug",
+		"cwd": "${workspaceFolder}",
+		"executable": "${workspaceFolder}/build/zephyr/zephyr.elf",
+		"runToEntryPoint": "main",
+		"servertype": "openocd",
+		"interface": "swd",
+		"serverpath": "/usr/bin/openocd",
+		"configFiles": [
+			"../zephyr/boards/arm/nucleo_f429zi/support/openocd.cfg",
+		],
+		"device": "STM32F429ZI",
+		"svdFile": "${workspaceFolder}/STM32F429.svd",
+		"gdbpath" : "/usr/bin/arm-none-eabi-gdb",
+		"debugServer": 3333,
+		// "swoConfig": {
+		// 	"enabled": true,
+		// 	"cpuFrequency": 168000000,
+		// 	"swoFrequency": 42000000,
+		// },
+		"cpu": "cortex-m4",
+		// "preLaunchCommands": [
+		// 	"set remotetimeout 5",
+		// ]
+		"preLaunchCommands":[
+			"set remotetimeout 20"
+		],		
+	}
     ]
 }
