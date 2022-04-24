@@ -9,7 +9,7 @@
 #include "../drivers/crc/stm32_crc32.h"
 
 #include <logging/log.h>
-LOG_MODULE_REGISTER(ipc, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(ipc, LOG_LEVEL_DBG);
 
 // TODO monitor usage using CONFIG_MEM_SLAB_TRACE_MAX_UTILIZATION
 
@@ -99,8 +99,10 @@ static bool ipc_is_initialized(void)
 int ipc_attach_rx_msgq(struct k_msgq *msgq)
 {
 	if (ipc_is_initialized() == true) {
-		LOG_ERR("IPC already initialized %d", 0);
-		return -EINVAL;
+		LOG_WRN("IPC already initialized %d", 0);
+		/* TODO introduce a condition variable in order initialize
+		 * only after having attached the msgq */
+		// return -EINVAL;
 	}
 
 	application_msgq = msgq;
@@ -423,7 +425,7 @@ static bool verify_frame_crc32(ipc_frame_t *frame)
 
 static void ipc_log_frame(const ipc_frame_t *frame)
 {
-	LOG_INF("IPC frame: %u B, seq = %x, data size = %u, sfd = %x, efd = %x crc32=%x",
+	LOG_INF("RX IPC frame: %u B, seq = %x, data size = %u, sfd = %x, efd = %x crc32=%x",
 		IPC_FRAME_SIZE, frame->seq, frame->data.size, frame->start_delimiter,
 		frame->end_delimiter, frame->crc32);
 	LOG_HEXDUMP_DBG(frame->data.buf, frame->data.size, "IPC frame data");
@@ -445,7 +447,7 @@ static void ipc_thread(void *_a, void *_b, void *_c)
 			LOG_WRN("Seq gap %u -> %u, %u frames lost", last_seq,
 				frame->seq, frame->seq - last_seq - 1);
 		} else if (frame->seq < last_seq) {
-			LOG_WRN("Seq rollback to %u %u, peer probably reseted",
+			LOG_WRN("Seq rollback from %u to %u, peer probably reseted",
 				last_seq, frame->seq);
 		}
 

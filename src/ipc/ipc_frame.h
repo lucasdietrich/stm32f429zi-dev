@@ -5,7 +5,7 @@
 
 #define IPC_VERSION 1
 
-#define IPC_MAX_DATA_SIZE 0x100U
+#define IPC_MAX_DATA_SIZE 0x10U
 
 #define FILL_UINT32_WITH_BYTE(byte) ((uint32_t) (((byte) & 0xFFU) \
 	| (((byte) & 0xFFU) << 8U) \

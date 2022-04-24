@@ -76,7 +76,7 @@
 // https://docs.zephyrproject.org/latest/reference/devicetree/bindings/serial/st,stm32-uart.html?highlight=stm32%20uart
 &uart7 {
 	status = "okay";
-	current-speed = <1000000>; // 1000000
+	current-speed = <115200>; // 1000000
 	// hw-flow-control;
 	pinctrl-0 = <&uart7_tx_pe8 &uart7_rx_pe7>;
 
