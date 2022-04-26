@@ -53,6 +53,7 @@
 	current-speed = <1000000>; // 1000000
 	// hw-flow-control;
 	pinctrl-0 = <&uart8_tx_pe1 &uart8_rx_pe0>;
+	pinctrl-names = "default";
 
 	// https://docs.zephyrproject.org/latest/reference/devicetree/bindings/dma/st%2Cstm32-dma-v1.html
 
@@ -79,6 +80,7 @@
 	current-speed = <115200>; // 1000000
 	// hw-flow-control;
 	pinctrl-0 = <&uart7_tx_pe8 &uart7_rx_pe7>;
+	pinctrl-names = "default";
 
 	// https://docs.zephyrproject.org/latest/reference/devicetree/bindings/dma/st%2Cstm32-dma-v1.html
 
