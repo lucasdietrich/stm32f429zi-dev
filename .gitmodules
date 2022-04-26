@@ -1,0 +1,3 @@
+[submodule "src/uart_ipc"]
+	path = src/uart_ipc
+	url = https://github.com/lucasdietrich/zephyr-uart-dma-ipc.git
