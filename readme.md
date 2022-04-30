@@ -19,6 +19,17 @@ Generated files :
 - Build with `west build`
 - Flash with `west flash --serial {$serialNumber}`
 - Monitor with `screen /dev/ttyACM0 115200`
-- Debug with F5
+
+## Debug
+
+There are two methods of debug currently
+
+- One  based on extension for VS code which uses `gdb`, `stutil` (from ST), this method is very slow.
+  - Run with `F5` with profile `cortex-debug stutil`
+- Another is based on `gdb` and `openocd`, which is faster but doesn't provide specific support for ARM cortex cores (like registers, etc...)
+  - Run `west debugserver` and then `F5` with profile `cppdbg OpenOCD (west debugserver)`
+- **TODO**, the goal is to use the `cortex-debug` extension from VS code with `openocd`, but I'm experiencing some issues.
+  - Run `west debugserver` and then `F5` with profile `cortex-debug OpenOCD (west debugserver)`
+  - Issues encountered :
 
 ![](./pics/debug.png)
