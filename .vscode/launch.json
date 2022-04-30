@@ -27,7 +27,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "JLink debug",
+            "name": "STlink debug",
             "type": "cortex-debug",
             "request": "launch", // "attach" ?
             "executable": "${workspaceFolder}/build/zephyr/zephyr.elf",
