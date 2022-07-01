@@ -7,7 +7,9 @@
         "stm32_crc32.h": "c",
         "stm32f4xx_ll_crc.h": "c",
         "stm32f4xx.h": "c",
-        "stm32f4xx_hal_crc.h": "c"
+        "stm32f4xx_hal_crc.h": "c",
+        "flash.h": "c"
     },
-    "git.useForcePushWithLease": true
+    "git.useForcePushWithLease": true,
+    "cortex-debug.variableUseNaturalFormat": false
 }

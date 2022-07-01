@@ -2,6 +2,21 @@
 	"version": "0.2.0",
 	"configurations": [
 		{
+			"name": "LAUNCH cortex-debug OpenOCD",
+			"cwd": "${workspaceRoot}",
+			"executable": "./build/zephyr/zephyr.elf",
+			"request": "launch",
+			"type": "cortex-debug",
+			"servertype": "openocd",
+			"device": "stm32f429zi",
+			"runToEntryPoint": "main",
+			"configFiles": [
+				"interface/stlink.cfg",
+				"target/stm32f4x.cfg"
+			],
+			"svdFile": "./STM32F429.svd"
+		},
+		{
 			"name": "cortex-debug stutil",
 			"type": "cortex-debug",
 			"request": "launch", // "attach" ?
